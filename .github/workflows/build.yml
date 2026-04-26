@@ -19,40 +19,29 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Setup Gradle 8.4
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.4'
+
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v2
+        uses: android-actions/setup-android@v3
 
-      - name: Install SDK components
+      - name: Install Android platform & build-tools
         run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
-          echo "SDK components installed"
-
-      - name: Extract real gradle-wrapper.jar
-        run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.4-bin.zip -O /tmp/gradle.zip
-          unzip -q /tmp/gradle.zip -d /tmp/
-          JAR=$(find /tmp/gradle-8.4 -name "gradle-wrapper*.jar" | head -1)
-          echo "Wrapper jar: $JAR ($(du -h $JAR | cut -f1))"
-          cp "$JAR" GlobalInsightEngine/gradle/wrapper/gradle-wrapper.jar
-          ls -lh GlobalInsightEngine/gradle/wrapper/
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+          yes | sdkmanager --licenses || true
 
       - name: Build Debug APK
-        run: |
-          set -e
-          cd GlobalInsightEngine
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+        working-directory: GlobalInsightEngine
+        run: gradle assembleDebug --no-daemon --stacktrace
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
 
-      - name: Find all APKs
-        if: always()
-        run: |
-          echo "=== All APKs ==="
-          find GlobalInsightEngine -name "*.apk" 2>/dev/null || echo "No APKs found"
-          echo "=== Build dir ==="
-          ls -la GlobalInsightEngine/app/build/outputs/ 2>/dev/null || echo "No outputs dir"
+      - name: List generated APK
+        run: find GlobalInsightEngine -name "*.apk" | xargs ls -lh
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: GlobalInsightEngine-APK
