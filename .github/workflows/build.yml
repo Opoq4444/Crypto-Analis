@@ -19,43 +19,57 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # ubuntu-22.04 уже имеет Android SDK в /usr/local/lib/android/sdk
-      - name: Check pre-installed SDK
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          ls $ANDROID_HOME/platforms/ 2>/dev/null && echo "Platforms OK" || echo "No platforms"
-          ls $ANDROID_HOME/build-tools/ 2>/dev/null && echo "Build-tools OK" || echo "No build-tools"
-
-      - name: Install SDK components if needed
-        run: |
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -f "$SDKMANAGER" ]; then
-            SDKMANAGER="$ANDROID_HOME/cmdline-tools/10.0/bin/sdkmanager"
-          fi
-          yes | $SDKMANAGER --licenses 2>/dev/null || true
-          $SDKMANAGER "platforms;android-34" "build-tools;34.0.0" 2>/dev/null || true
-
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.4'
           cache-disabled: true
 
-      - name: Build Debug APK
-        working-directory: GlobalInsightEngine
+      - name: Debug — Android SDK info
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          ls $ANDROID_HOME/platforms/ || true
-          ls $ANDROID_HOME/build-tools/ || true
-          gradle assembleDebug --no-daemon --stacktrace 2>&1
+          echo "=== ANDROID_HOME ===" | tee -a /tmp/build.log
+          echo "$ANDROID_HOME" | tee -a /tmp/build.log
+          echo "=== Platforms ===" | tee -a /tmp/build.log
+          ls $ANDROID_HOME/platforms/ 2>&1 | tee -a /tmp/build.log
+          echo "=== Build-tools ===" | tee -a /tmp/build.log
+          ls $ANDROID_HOME/build-tools/ 2>&1 | tee -a /tmp/build.log
+          echo "=== Gradle version ===" | tee -a /tmp/build.log
+          gradle --version 2>&1 | tee -a /tmp/build.log
+
+      - name: Accept SDK licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 | tail -5 | tee -a /tmp/build.log || true
+
+      - name: Generate Gradle wrapper
+        run: |
+          cd GlobalInsightEngine
+          gradle wrapper --gradle-version=8.4 --distribution-type=bin 2>&1 | tee -a /tmp/build.log
+          chmod +x gradlew
+
+      - name: Build Debug APK
+        run: |
+          cd GlobalInsightEngine
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee -a /tmp/build.log
+          BUILD_EXIT=${PIPESTATUS[0]}
+          echo "Build exit code: $BUILD_EXIT" | tee -a /tmp/build.log
+          exit $BUILD_EXIT
 
       - name: Find APK
+        if: success()
         run: find . -name "*.apk" -exec ls -lh {} \;
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: GlobalInsightEngine-APK
           path: GlobalInsightEngine/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
           retention-days: 30
+
+      - name: Upload build log (always — for debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: /tmp/build.log
+          retention-days: 7
