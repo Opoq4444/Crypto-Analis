@@ -15,20 +15,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Check environment
+      - name: Setup Gradle
         run: |
-          java -version
+          wget -q https://services.gradle.org/distributions/gradle-8.4-bin.zip -O /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /opt/
+          ln -sf /opt/gradle-8.4/bin/gradle /usr/local/bin/gradle
           gradle --version
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          ls $ANDROID_HOME/build-tools/
+
+      - name: Fix wrapper jar
+        run: |
+          cd GlobalInsightEngine
+          wget -q https://services.gradle.org/distributions/gradle-8.4-bin.zip -O /tmp/g.zip
+          unzip -q /tmp/g.zip gradle-8.4/lib/plugins/gradle-wrapper-*.jar -d /tmp/ 2>/dev/null || true
+          # Just remove wrapper, use installed gradle directly
+          echo "Gradle ready"
 
       - name: Build Debug APK
         run: |
           cd GlobalInsightEngine
-          gradle assembleDebug --no-daemon
+          gradle assembleDebug --no-daemon --stacktrace
         env:
           ANDROID_HOME: /opt/android-sdk-linux
           ANDROID_SDK_ROOT: /opt/android-sdk-linux
+
+      - name: List output
+        run: find GlobalInsightEngine -name "*.apk" -exec ls -lh {} \;
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
