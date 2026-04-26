@@ -19,27 +19,42 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Gradle (without wrapper)
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.4'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android platform & build tools
+      - name: Check pre-installed Android SDK
         run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          ls $ANDROID_HOME/build-tools/ || echo "No build-tools"
+          ls $ANDROID_HOME/platforms/ || echo "No platforms"
+
+      - name: Install missing SDK components
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            --channel=0
+
+      - name: Download real Gradle wrapper jar
+        run: |
+          cd GlobalInsightEngine
+          mkdir -p gradle/wrapper
+          curl -L -o gradle/wrapper/gradle-wrapper.jar \
+            "https://services.gradle.org/distributions/gradle-8.4-wrapper.jar" || \
+          curl -L -o gradle/wrapper/gradle-wrapper.jar \
+            "https://raw.githubusercontent.com/gradle/gradle/v8.4.0/gradle/wrapper/gradle-wrapper.jar"
+          ls -lh gradle/wrapper/
 
       - name: Build Debug APK
-        working-directory: GlobalInsightEngine
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          cd GlobalInsightEngine
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1
         env:
-          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
 
-      - name: Find APK
-        run: find GlobalInsightEngine -name "*.apk" -exec ls -lh {} \;
+      - name: List APK output
+        run: find GlobalInsightEngine -name "*.apk" 2>/dev/null || echo "No APK found"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
