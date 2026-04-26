@@ -5,42 +5,37 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  issues: write
+
 jobs:
   build:
-    # Docker-контейнер с полным Android SDK — никаких проблем с установкой
     runs-on: ubuntu-22.04
-    container:
-      image: thyrlian/android-sdk:latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Check SDK
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          ls $ANDROID_HOME/platforms/
-          ls $ANDROID_HOME/build-tools/
-          java -version
-          gradle --version || true
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
-      - name: Install SDK components
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
         run: |
           yes | sdkmanager --licenses 2>/dev/null || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" || \
-          sdkmanager "platforms;android-33" "build-tools;33.0.3"
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Update compileSdk to match installed
-        run: |
-          # Use android-33 as fallback if 34 unavailable
-          if ls $ANDROID_HOME/platforms/android-34 2>/dev/null; then
-            echo "Using compileSdk 34"
-          else
-            echo "Falling back to compileSdk 33"
-            sed -i 's/compileSdk 34/compileSdk 33/' GlobalInsightEngine/app/build.gradle
-            sed -i 's/targetSdk 34/targetSdk 33/' GlobalInsightEngine/app/build.gradle
-          fi
-          cat GlobalInsightEngine/app/build.gradle
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.4'
+          cache-disabled: true
 
       - name: Generate Gradle wrapper
         run: |
@@ -49,17 +44,53 @@ jobs:
           chmod +x gradlew
 
       - name: Build Debug APK
+        id: build
+        continue-on-error: true
         run: |
           cd GlobalInsightEngine
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
+          echo "STATUS=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
 
-      - name: List APK
-        run: find GlobalInsightEngine -name "*.apk" -exec ls -lh {} \;
-
-      - name: Upload APK
+      - name: Upload APK ✅
+        if: steps.build.outputs.STATUS == '0'
         uses: actions/upload-artifact@v4
         with:
           name: GlobalInsightEngine-APK
           path: GlobalInsightEngine/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
-          if-no-files-found: error
+
+      # Если билд упал — создаём Issue и назначаем Copilot Agent
+      - name: Create Copilot Issue on failure 🤖
+        if: steps.build.outputs.STATUS != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ERRORS=$(grep -A3 "FAILURE\|error:\|Exception\|Could not\|BUILD FAILED" /tmp/build.log | head -80 || tail -80 /tmp/build.log)
+          
+          gh issue create \
+            --title "🔧 [Auto] Fix Android APK build failure — assign to Copilot" \
+            --body "## ❌ Build failed automatically
+          
+          **Workflow:** Build APK  
+          **File:** \`GlobalInsightEngine/\` (Android Gradle project)  
+          **Goal:** Build a working \`app-debug.apk\`
+          
+          ## 🔍 Error log
+          \`\`\`
+          ${ERRORS}
+          \`\`\`
+          
+          ## 📁 Key files to fix
+          - \`GlobalInsightEngine/app/build.gradle\` — compileSdk, dependencies
+          - \`GlobalInsightEngine/build.gradle\` — AGP version
+          - \`GlobalInsightEngine/settings.gradle\` — repo config
+          - \`GlobalInsightEngine/app/src/main/AndroidManifest.xml\` — app manifest
+          - \`.github/workflows/build.yml\` — CI workflow
+          
+          ## ✅ Fix needed
+          Please fix the Gradle/Android build configuration so \`./gradlew assembleDebug\` succeeds and produces an APK.
+          
+          _Assign this issue to **Copilot** to auto-fix._"
+          
+          echo "✅ Issue created! Go to github.com/Opoq4444/Crypto-Analis/issues and assign it to Copilot"
+          exit 1
