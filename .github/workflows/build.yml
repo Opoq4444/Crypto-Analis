@@ -23,74 +23,76 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages
+      - name: Verify Android SDK
         run: |
-          yes | sdkmanager --licenses 2>/dev/null || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls $ANDROID_HOME/platforms/
+          ls $ANDROID_HOME/build-tools/
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
 
-      - name: Setup Gradle
+      - name: Setup Gradle 8.5
         uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: '8.4'
+          gradle-version: '8.5'
           cache-disabled: true
-
-      - name: Generate Gradle wrapper
-        run: |
-          cd GlobalInsightEngine
-          gradle wrapper --gradle-version=8.4 --distribution-type=bin
-          chmod +x gradlew
 
       - name: Build Debug APK
         id: build
         continue-on-error: true
+        working-directory: GlobalInsightEngine
         run: |
-          cd GlobalInsightEngine
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
-          echo "STATUS=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
+          echo "CODE=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
 
-      - name: Upload APK ✅
-        if: steps.build.outputs.STATUS == '0'
+      - name: ✅ Upload APK (if success)
+        if: steps.build.outputs.CODE == '0'
         uses: actions/upload-artifact@v4
         with:
           name: GlobalInsightEngine-APK
           path: GlobalInsightEngine/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
 
-      # Если билд упал — создаём Issue и назначаем Copilot Agent
-      - name: Create Copilot Issue on failure 🤖
-        if: steps.build.outputs.STATUS != '0'
+      - name: 🤖 Create Copilot Issue (if failed)
+        if: steps.build.outputs.CODE != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ERRORS=$(grep -A3 "FAILURE\|error:\|Exception\|Could not\|BUILD FAILED" /tmp/build.log | head -80 || tail -80 /tmp/build.log)
-          
-          gh issue create \
-            --title "🔧 [Auto] Fix Android APK build failure — assign to Copilot" \
-            --body "## ❌ Build failed automatically
-          
-          **Workflow:** Build APK  
-          **File:** \`GlobalInsightEngine/\` (Android Gradle project)  
-          **Goal:** Build a working \`app-debug.apk\`
-          
-          ## 🔍 Error log
+          LOG=$(grep -E "error:|FAILED|Exception|Could not|Task :app" /tmp/build.log | head -60)
+          FULL_LOG=$(tail -100 /tmp/build.log)
+
+          ISSUE_URL=$(gh issue create \
+            --title "🔧 Fix: Android APK build fails — assign to Copilot" \
+            --body "## Build Failed — Needs Fix
+
+          **Project:** \`GlobalInsightEngine/\` — Android WebView app  
+          **Goal:** Make \`gradle assembleDebug\` succeed and produce \`app-debug.apk\`
+
+          ## Key errors
           \`\`\`
-          ${ERRORS}
+          ${LOG}
           \`\`\`
-          
-          ## 📁 Key files to fix
-          - \`GlobalInsightEngine/app/build.gradle\` — compileSdk, dependencies
-          - \`GlobalInsightEngine/build.gradle\` — AGP version
-          - \`GlobalInsightEngine/settings.gradle\` — repo config
-          - \`GlobalInsightEngine/app/src/main/AndroidManifest.xml\` — app manifest
-          - \`.github/workflows/build.yml\` — CI workflow
-          
-          ## ✅ Fix needed
-          Please fix the Gradle/Android build configuration so \`./gradlew assembleDebug\` succeeds and produces an APK.
-          
-          _Assign this issue to **Copilot** to auto-fix._"
-          
-          echo "✅ Issue created! Go to github.com/Opoq4444/Crypto-Analis/issues and assign it to Copilot"
+
+          ## Full log (last 100 lines)
+          \`\`\`
+          ${FULL_LOG}
+          \`\`\`
+
+          ## Files
+          - \`GlobalInsightEngine/build.gradle\` 
+          - \`GlobalInsightEngine/app/build.gradle\`
+          - \`GlobalInsightEngine/settings.gradle\`
+          - \`GlobalInsightEngine/app/src/main/AndroidManifest.xml\`
+          - \`.github/workflows/build.yml\`
+
+          **Assign to Copilot** to auto-fix → it will create a PR.")
+
+          echo "Issue created: $ISSUE_URL"
           exit 1
+
+      - name: Upload build log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: /tmp/build.log
+          retention-days: 7
