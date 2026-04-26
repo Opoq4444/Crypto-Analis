@@ -18,29 +18,28 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
+
+      - name: Setup Gradle (without wrapper)
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.4'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          cmdline-tools-version: '11076708'
 
-      - name: Install SDK components
+      - name: Install Android platform & build tools
         run: |
-          sdkmanager --install "platforms;android-34" "build-tools;34.0.0" --sdk_root=$ANDROID_SDK_ROOT
-          yes | sdkmanager --licenses --sdk_root=$ANDROID_SDK_ROOT || true
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
       - name: Build Debug APK
-        run: |
-          cd GlobalInsightEngine
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --info
+        working-directory: GlobalInsightEngine
+        run: gradle assembleDebug --no-daemon --stacktrace
         env:
-          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
 
-      - name: Show APK info
-        run: |
-          find GlobalInsightEngine -name "*.apk" -exec ls -lh {} \;
+      - name: Find APK
+        run: find GlobalInsightEngine -name "*.apk" -exec ls -lh {} \;
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
