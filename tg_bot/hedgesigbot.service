@@ -1,0 +1,17 @@
+[Unit]
+Description=HedgeSigSignal Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/hedgesignal-bot
+ExecStart=/usr/bin/node bot.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hedgesigbot
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

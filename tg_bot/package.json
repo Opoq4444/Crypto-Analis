@@ -1,0 +1,10 @@
+{
+  "name": "hedgesignal-bot",
+  "version": "1.0.0",
+  "description": "Crypto Hedge Fund Signal Telegram Bot",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "engines": { "node": ">=16" }
+}
