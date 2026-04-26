@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
@@ -19,32 +19,43 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Gradle 8.4
+      # ubuntu-22.04 уже имеет Android SDK в /usr/local/lib/android/sdk
+      - name: Check pre-installed SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls $ANDROID_HOME/platforms/ 2>/dev/null && echo "Platforms OK" || echo "No platforms"
+          ls $ANDROID_HOME/build-tools/ 2>/dev/null && echo "Build-tools OK" || echo "No build-tools"
+
+      - name: Install SDK components if needed
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -f "$SDKMANAGER" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/10.0/bin/sdkmanager"
+          fi
+          yes | $SDKMANAGER --licenses 2>/dev/null || true
+          $SDKMANAGER "platforms;android-34" "build-tools;34.0.0" 2>/dev/null || true
+
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.4'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android platform & build-tools
-        run: |
-          sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
-          yes | sdkmanager --licenses || true
+          cache-disabled: true
 
       - name: Build Debug APK
         working-directory: GlobalInsightEngine
-        run: gradle assembleDebug --no-daemon --stacktrace
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls $ANDROID_HOME/platforms/ || true
+          ls $ANDROID_HOME/build-tools/ || true
+          gradle assembleDebug --no-daemon --stacktrace 2>&1
 
-      - name: List generated APK
-        run: find GlobalInsightEngine -name "*.apk" | xargs ls -lh
+      - name: Find APK
+        run: find . -name "*.apk" -exec ls -lh {} \;
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: GlobalInsightEngine-APK
           path: GlobalInsightEngine/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30
           if-no-files-found: error
+          retention-days: 30
