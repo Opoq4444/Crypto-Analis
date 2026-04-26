@@ -4,12 +4,13 @@ plugins {
 
 android {
     namespace 'com.globalinsight.engine'
-    compileSdk 34
+    compileSdkVersion 33
+    buildToolsVersion "33.0.2"
 
     defaultConfig {
         applicationId "com.globalinsight.engine"
-        minSdk 23
-        targetSdk 34
+        minSdkVersion 23
+        targetSdkVersion 33
         versionCode 1
         versionName "1.0"
     }
