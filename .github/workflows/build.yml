@@ -14,80 +14,40 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Verify Android SDK
+      - name: SDK info + accept licenses
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
-          ls $ANDROID_HOME/platforms/
-          ls $ANDROID_HOME/build-tools/
+          ls $ANDROID_HOME/platforms/ 2>/dev/null || echo "No platforms dir"
+          ls $ANDROID_HOME/build-tools/ 2>/dev/null || echo "No build-tools dir"
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
 
-      - name: Setup Gradle 8.5
-        uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.5'
           cache-disabled: true
 
-      - name: Build Debug APK
+      - name: Build APK
         id: build
         continue-on-error: true
         working-directory: GlobalInsightEngine
         run: |
-          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
+          gradle assembleDebug --no-daemon --stacktrace --info 2>&1 | tee /tmp/build.log
           echo "CODE=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
 
-      - name: ✅ Upload APK (if success)
+      - name: Upload APK ✅
         if: steps.build.outputs.CODE == '0'
         uses: actions/upload-artifact@v4
         with:
           name: GlobalInsightEngine-APK
           path: GlobalInsightEngine/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
-
-      - name: 🤖 Create Copilot Issue (if failed)
-        if: steps.build.outputs.CODE != '0'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          LOG=$(grep -E "error:|FAILED|Exception|Could not|Task :app" /tmp/build.log | head -60)
-          FULL_LOG=$(tail -100 /tmp/build.log)
-
-          ISSUE_URL=$(gh issue create \
-            --title "🔧 Fix: Android APK build fails — assign to Copilot" \
-            --body "## Build Failed — Needs Fix
-
-          **Project:** \`GlobalInsightEngine/\` — Android WebView app  
-          **Goal:** Make \`gradle assembleDebug\` succeed and produce \`app-debug.apk\`
-
-          ## Key errors
-          \`\`\`
-          ${LOG}
-          \`\`\`
-
-          ## Full log (last 100 lines)
-          \`\`\`
-          ${FULL_LOG}
-          \`\`\`
-
-          ## Files
-          - \`GlobalInsightEngine/build.gradle\` 
-          - \`GlobalInsightEngine/app/build.gradle\`
-          - \`GlobalInsightEngine/settings.gradle\`
-          - \`GlobalInsightEngine/app/src/main/AndroidManifest.xml\`
-          - \`.github/workflows/build.yml\`
-
-          **Assign to Copilot** to auto-fix → it will create a PR.")
-
-          echo "Issue created: $ISSUE_URL"
-          exit 1
 
       - name: Upload build log (always)
         if: always()
@@ -96,3 +56,57 @@ jobs:
           name: build-log
           path: /tmp/build.log
           retention-days: 7
+
+      - name: Create Copilot Issue 🤖
+        if: steps.build.outputs.CODE != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Write body to file to avoid shell escaping issues
+          python3 - << 'PYEOF'
+          import subprocess, os
+
+          with open('/tmp/build.log') as f:
+              log = f.read()
+
+          # Extract key errors
+          errors = [l for l in log.splitlines() if any(w in l for w in ['error:', 'FAILED', 'Exception', 'Could not', 'Task :app', 'BUILD'])]
+          error_text = '\n'.join(errors[-50:]) or log[-3000:]
+
+          body = f"""## ❌ Android APK Build Failure
+
+**Repo:** Opoq4444/Crypto-Analis  
+**Project dir:** `GlobalInsightEngine/`  
+**Task:** Make `gradle assembleDebug` produce `app-debug.apk`  
+**Runner:** ubuntu-22.04, Gradle 8.5, JDK 17
+
+## 🔍 Key errors
+```
+{error_text[-2000:]}
+```
+
+## 📁 Files to check
+- `GlobalInsightEngine/build.gradle`
+- `GlobalInsightEngine/app/build.gradle`  
+- `GlobalInsightEngine/settings.gradle`
+- `.github/workflows/build.yml`
+
+## ✅ Expected outcome
+`./gradlew assembleDebug` (or `gradle assembleDebug`) completes successfully and produces an APK.
+
+_Please assign this issue to **Copilot** to automatically create a fix PR._
+"""
+
+          with open('/tmp/issue_body.md', 'w') as f:
+              f.write(body)
+
+          result = subprocess.run(
+              ['gh', 'issue', 'create',
+               '--title', '🔧 Fix Android APK build — assign to Copilot',
+               '--body-file', '/tmp/issue_body.md'],
+              capture_output=True, text=True, env={**os.environ}
+          )
+          print(result.stdout)
+          print(result.stderr)
+          PYEOF
+          exit 1
